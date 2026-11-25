@@ -1,0 +1,281 @@
+openapi: 3.0.3
+info:
+  title: API Bibliothèque
+  version: 2.0.0
+  description: Extension Séance 6 — intégration OpenAI, Stripe et Webhooks.
+servers:
+  - url: http://localhost:3000/api/v1
+tags:
+  - name: Auth
+  - name: Books
+  - name: Borrows
+  - name: Subscriptions
+  - name: Webhooks
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Créer un compte
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201': { description: Compte créé }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Connexion (retourne un JWT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Token JWT }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /books:
+    get:
+      tags: [Books]
+      summary: Liste des livres
+      responses:
+        '200': { description: Liste }
+  /books/{id}:
+    get:
+      tags: [Books]
+      summary: Détail d'un livre
+      parameters: [{ $ref: '#/components/parameters/BookId' }]
+      responses:
+        '200': { description: Livre }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /books/{id}/summary:
+    post:
+      tags: [Books]
+      summary: Génère et sauvegarde un résumé via OpenAI
+      description: Si un résumé existe déjà, il est retourné sans nouvel appel API.
+      security: [{ BearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/BookId' }]
+      responses:
+        '200':
+          description: Résumé généré ou existant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SummaryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    get:
+      tags: [Books]
+      summary: Retourne le résumé existant
+      parameters: [{ $ref: '#/components/parameters/BookId' }]
+      responses:
+        '200':
+          description: Résumé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SummaryResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /books/{id}/summary/stream:
+    get:
+      tags: [Books]
+      summary: (Bonus) Résumé en streaming SSE
+      security: [{ BearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/BookId' }]
+      responses:
+        '200':
+          description: Flux text/event-stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /books/smart-search:
+    post:
+      tags: [Books]
+      summary: Recherche par description naturelle (mots-clés extraits par OpenAI)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [query]
+              properties:
+                query: { type: string, example: un livre sur les bonnes pratiques de programmation en Java }
+      responses:
+        '200':
+          description: Résultats
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SmartSearchResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /borrows:
+    post:
+      tags: [Borrows]
+      summary: Emprunter un livre (max 2 actifs en free)
+      security: [{ BearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [book_id]
+              properties: { book_id: { type: integer } }
+      responses:
+        '201': { description: Emprunt créé }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { description: Limite d'emprunts free atteinte }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+  /subscriptions/payment-intent:
+    post:
+      tags: [Subscriptions]
+      summary: Crée un PaymentIntent Stripe (5 €/mois premium)
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: PaymentIntent créé
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaymentIntentResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /subscriptions/status:
+    get:
+      tags: [Subscriptions]
+      summary: Statut d'abonnement de l'utilisateur connecté
+      security: [{ BearerAuth: [] }]
+      responses:
+        '200':
+          description: Statut
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: object
+                    properties:
+                      subscription_status: { type: string, enum: [free, premium] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /webhooks/stripe:
+    post:
+      tags: [Webhooks]
+      summary: Reçoit les événements Stripe (authentification par signature, pas JWT)
+      security: []
+      parameters:
+        - in: header
+          name: Stripe-Signature
+          required: true
+          schema: { type: string, example: 't=1700000000,v1=abcdef...' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              example:
+                type: payment_intent.succeeded
+                data: { object: { id: pi_3Px, amount: 500, metadata: { user_id: '42', plan: premium } } }
+      responses:
+        '200':
+          description: Événement reçu
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { received: { type: boolean, example: true } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+components:
+  securitySchemes:
+    BearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    BookId:
+      in: path
+      name: id
+      required: true
+      schema: { type: integer }
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [name, email, password]
+      properties:
+        name: { type: string }
+        email: { type: string }
+        password: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string }
+        password: { type: string }
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+    SummaryResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string, example: Résumé existant retourné (pas de nouvel appel API) }
+        data:
+          type: object
+          properties:
+            book_id: { type: integer, example: 1 }
+            title: { type: string, example: Clean Code }
+            summary: { type: string }
+            generated_by: { type: string, example: gpt-4o-mini }
+            generated_at: { type: string, format: date-time }
+    SmartSearchResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        query: { type: string }
+        keywords: { type: array, items: { type: string } }
+        data: { type: array, items: { type: object } }
+    PaymentIntentResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        data:
+          type: object
+          properties:
+            client_secret: { type: string, example: pi_3Px_secret_xxx }
+            amount: { type: integer, example: 500 }
+            currency: { type: string, example: eur }
+            publishable_key: { type: string, example: pk_test_xxx }
+  responses:
+    Unauthorized:
+      description: Non authentifié / signature invalide
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Ressource introuvable
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unprocessable:
+      description: Données invalides
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ServiceUnavailable:
+      description: Service tiers (OpenAI / Stripe) indisponible
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
